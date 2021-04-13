@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Benefit
+// SPDX-License-Identifier: EtherNaal
 pragma solidity >=0.6.0 <0.8.0;
 
 import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v3.0.0/contracts/token/ERC721/ERC721.sol";
