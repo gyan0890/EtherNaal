@@ -16,15 +16,18 @@ contract EtherNaalUpdated is ERC721URIStorage, AccessControl{
 	//maps tokenIds to item indexes
 	using Counters for Counters.Counter;
     Counters.Counter private _tokenIds;
-	mapping(uint256 => uint256) private itemIndex;
 	mapping(uint256 => uint256) private salePrice;
+	uint256 company_fee;
+	address payable ethernaal_org;
 	
     //Setting the minter and admin role 
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
     
-	constructor(string memory _name, string memory _symbol) ERC721(_name, _symbol) {
+	constructor(string memory _name, string memory _symbol, address payable org) ERC721(_name, _symbol) {
         grantRole(ADMIN_ROLE, msg.sender);
+        company_fee = 3;
+        ethernaal_org = org;
     }
     
     function supportsInterface(bytes4 interfaceId) public view virtual override(ERC721, AccessControl) returns (bool) {
@@ -44,6 +47,7 @@ contract EtherNaalUpdated is ERC721URIStorage, AccessControl{
 	}
 
 	function buyTokenOnSale(uint256 tokenId) public payable {
+	    require(ethernaal_org != address(0), "buyTokenOnSale: Organisation address cannot be empty");
 		uint256 price = salePrice[tokenId];
         require(price != 0, "buyToken: price equals 0");
         require(msg.value == price, "buyTokenOnSale: price doesn't equal salePrice[tokenId]");
@@ -51,18 +55,33 @@ contract EtherNaalUpdated is ERC721URIStorage, AccessControl{
 		approve(address(this), tokenId);
 		salePrice[tokenId] = 0;
 		transferFrom(owner, msg.sender, tokenId);
-        owner.transfer(msg.value);
+		uint256 artistPercentage = 100-company_fee;
+		uint256 artistBalance = (1 ether * 0.01) * msg.value* artistPercentage;
+        owner.transfer(artistBalance);
+        
+        uint256 companyBalance = (1 ether*0.01)*company_fee*msg.value;
+        ethernaal_org.transfer(companyBalance);
+        
+        
 	}
-
-	function mintWithIndex(address to, uint256 index, string memory tokenURI) public  {
+    
+    function setFees(uint256 fees) public {
+        require(fees < 100, "setFees: Company fees is in percentage, cannot be greater than 100");
+        company_fee = fees;
+    }
+    
+	function mintWithIndex(address to, string memory tokenURI) public  {
         require(hasRole(MINTER_ROLE, msg.sender) == true, "mintWithIndex: Only minters can mint new tokens");
         _tokenIds.increment();
         uint256 tokenId = _tokenIds.current();
-		itemIndex[tokenId] = index;
         _mint(to, tokenId);
         
         //Here, we will set the metadata hash link of the token metadata from Pinata
         _setTokenURI(tokenId, tokenURI);
+	}
+	
+	function withDrawAdminFunds(address company) internal {
+	    
 	}
 	
 	//Return the admin address
@@ -70,10 +89,6 @@ contract EtherNaalUpdated is ERC721URIStorage, AccessControl{
         return getRoleAdmin("ADMIN_ROLE");
     }
     
-    //Return the index of a token ID
-	function getItemIndex(uint256 tokenId) public view returns (uint256) {
-		return itemIndex[tokenId];
-	}
 
     //Return the salePrice
 	function getSalePrice(uint256 tokenId) public view returns (uint256) {
