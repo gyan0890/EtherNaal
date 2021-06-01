@@ -66,6 +66,7 @@ contract EtherNaalUpdated is ERC721URIStorage, AccessControl{
 	}
     
     function setFees(uint256 fees) public {
+        require(hasRole(MINTER_ROLE, msg.sender) == true, "setFees: Only admin can set the fees");
         require(fees < 100, "setFees: Company fees is in percentage, cannot be greater than 100");
         company_fee = fees;
     }
@@ -78,10 +79,6 @@ contract EtherNaalUpdated is ERC721URIStorage, AccessControl{
         
         //Here, we will set the metadata hash link of the token metadata from Pinata
         _setTokenURI(tokenId, tokenURI);
-	}
-	
-	function withDrawAdminFunds(address company) internal {
-	    
 	}
 	
 	//Return the admin address
