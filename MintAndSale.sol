@@ -44,9 +44,10 @@ contract EtherNaal is ERC721, Ownable{
 		transferFrom(owner, msg.sender, tokenId);
         owner.transfer(msg.value);
 	}
-
-	//function mintWithIndex(address to, string memory tokenURI) onlyMinter  {
-	function mintWithIndex(address to, string memory tokenURI) public {
+	
+	// This line is only for my localtest
+	//function mintWithIndex(address to, string memory tokenURI) public { 
+	function mintWithIndex(address to, string memory tokenURI) onlyMinter  {
 		uint256 tokenId = totalSupply() + 1;
         _mint(to, tokenId);     
         _setTokenURI(tokenId, tokenURI);
