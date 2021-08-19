@@ -1,14 +1,24 @@
 // SPDX-License-Identifier: EtherNaal
 
-pragma solidity >=0.6.0 <0.8.0;
+pragma solidity >=0.6.0 <0.9.0;
 
-import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v3.0.0/contracts/token/ERC721/ERC721.sol";
-import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v3.0.0/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
+import "@openzeppelin/contracts/utils/Counters.sol";
 
 
-contract EtherNaal is ERC721, Ownable{
+contract EtherNaal is ERC721URIStorage{
 		mapping(uint256 => uint256) private salePrice;
 	    mapping(address => bool) private creatorWhitelist;
+	    mapping (address => uint256[]) private ownedTokens;
+        mapping(uint256 => uint256) private ownedTokensIndex;
+        mapping (uint256 => address) private tokenOwner;
+         
+	    address owner;
+	    uint256 company_fee;
+	    address payable ethernaal_org;
+	    using Counters for Counters.Counter;
+        Counters.Counter private _tokenIds;
+        string category;
 
     event WhitelistCreator(address indexed _creator);
 
@@ -16,21 +26,33 @@ contract EtherNaal is ERC721, Ownable{
         require(creatorWhitelist[msg.sender] == true);
         _;
     }
+    
+    modifier onlyOwner() {
+        require(msg.sender == owner);
+        _;
+    }
 	
   //Setting the MINTER_ROLE as onlyMinter is deprecated 
   //in the recent Solidity releases
   //bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
 
-	constructor(string memory _name, string memory _symbol) public ERC721(_name, _symbol) {
-    //grantRole(MINTER_ROLE, msg.sender);
-    //Here, we should set the baseURI for the tokens(This can be set as the Pinata address)
-    _setBaseURI("https://gateway.pinata.cloud/ipfs/");
+	constructor(string memory _name, string memory _symbol, address payable org, string memory _category) ERC721(_name, _symbol) {
+    owner = msg.sender;
+    company_fee = 3;
+    ethernaal_org = org;
+    category = _category;
+    //Upwards of 0.8.0 - setBaseURI needs to be overridden, so removing this.
+    // _setBaseURI("https://gateway.pinata.cloud/ipfs/");
     }
 
+    function getCategory() public view returns(string memory) {
+        return category;    
+    }
+    
 	function setSale(uint256 tokenId, uint256 price) public {
-		address owner = ownerOf(tokenId);
-        require(owner != address(0), "setSale: nonexistent token");
-        require(owner == msg.sender, "setSale: msg.sender is not the owner of the token");
+		address tOwner = ownerOf(tokenId);
+        require(tOwner != address(0), "setSale: nonexistent token");
+        require(tOwner == msg.sender, "setSale: msg.sender is not the owner of the token");
 		salePrice[tokenId] = price;
 	}
 
@@ -38,19 +60,32 @@ contract EtherNaal is ERC721, Ownable{
 		uint256 price = salePrice[tokenId];
         require(price != 0, "buyToken: price equals 0");
         require(msg.value == price, "buyToken: price doesn't equal salePrice[tokenId]");
-		address payable owner = address(uint160(ownerOf(tokenId)));
+		address tOwner = ownerOf(tokenId);
 		approve(address(this), tokenId);
 		salePrice[tokenId] = 0;
-		transferFrom(owner, msg.sender, tokenId);
-        owner.transfer(msg.value);
+		
+		transferFrom(tOwner, msg.sender, tokenId);
+		uint256 artistPercentage = 100-company_fee;
+		uint256 artistBalance = (1 ether * 0.01) * msg.value* artistPercentage;
+        payable(tOwner).transfer(artistBalance);
+        
+        uint256 companyBalance = (1 ether*0.01)*company_fee*msg.value;
+        ethernaal_org.transfer(companyBalance);
 	}
 	
 	// This line is only for my localtest
 	//function mintWithIndex(address to, string memory tokenURI) public { 
-	function mintWithIndex(address to, string memory tokenURI) onlyMinter  {
-		uint256 tokenId = totalSupply() + 1;
+	function mintWithIndex(address to, string memory tokenURI) public onlyMinter returns(uint256 _tokenId) {
+	    _tokenIds.increment();
+		uint256 tokenId = _tokenIds.current();
+		tokenOwner[tokenId] = to;
+        uint256 length = balanceOf(to);
+        ownedTokens[to].push(tokenId);
+        ownedTokensIndex[tokenId] = length;
         _mint(to, tokenId);     
         _setTokenURI(tokenId, tokenURI);
+        
+        return tokenId;
 	}
 
 	function whitelistCreator(address _creator) public onlyOwner {
