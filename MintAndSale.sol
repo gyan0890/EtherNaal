@@ -12,6 +12,7 @@ contract EtherNaal is ERC721URIStorage{
 	    mapping (address => uint256[]) private ownedTokens;
         mapping(uint256 => uint256) private ownedTokensIndex;
         mapping (uint256 => address) private tokenOwner;
+        mapping(uint256 => string) public tokenURIMap;
          
 	    address owner;
 	    uint256 company_fee;
@@ -75,7 +76,7 @@ contract EtherNaal is ERC721URIStorage{
 	
 	// This line is only for my localtest
 	//function mintWithIndex(address to, string memory tokenURI) public { 
-	function mintWithIndex(address to, string memory tokenURI) public onlyMinter returns(uint256 _tokenId) {
+	function mintWithIndex(address to, string memory _tokenURI) public onlyMinter returns(uint256 _tokenId) {
 	    _tokenIds.increment();
 		uint256 tokenId = _tokenIds.current();
 		tokenOwner[tokenId] = to;
@@ -83,11 +84,16 @@ contract EtherNaal is ERC721URIStorage{
         ownedTokens[to].push(tokenId);
         ownedTokensIndex[tokenId] = length;
         _mint(to, tokenId);     
-        _setTokenURI(tokenId, tokenURI);
+        _setTokenURI(tokenId, _tokenURI);
+        tokenURIMap[tokenId] = _tokenURI;
         
         return tokenId;
 	}
 
+    function tokensOf(address _owner) public view returns (uint256[] memory) {
+        return ownedTokens[_owner];
+    }
+    
 	function whitelistCreator(address _creator) public onlyOwner {
       creatorWhitelist[_creator] = true;
       WhitelistCreator(_creator);
@@ -99,5 +105,9 @@ contract EtherNaal is ERC721URIStorage{
 
     function isWhitelisted(address _creator) external view returns (bool) {
       return creatorWhitelist[_creator];
+    }
+    
+     function getTokenURI(uint256 _tokenId) external view returns (string memory) {
+        return tokenURIMap[_tokenId];
     }
 }
