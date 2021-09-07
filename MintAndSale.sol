@@ -1,7 +1,8 @@
-// SPDX-License-Identifier: EtherNaal
+// SPDX-License-Identifier: UNLICENSED
 
 pragma solidity >=0.6.0 <0.9.0;
 
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
 import "@openzeppelin/contracts/utils/Counters.sol";
 
@@ -33,21 +34,30 @@ contract EtherNaal is ERC721URIStorage{
         _;
     }
 	
-  //Setting the MINTER_ROLE as onlyMinter is deprecated 
-  //in the recent Solidity releases
-  //bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
 
 	constructor(string memory _name, string memory _symbol, address payable org, string memory _category) ERC721(_name, _symbol) {
     owner = msg.sender;
     company_fee = 3;
     ethernaal_org = org;
     category = _category;
-    //Upwards of 0.8.0 - setBaseURI needs to be overridden, so removing this.
-    // _setBaseURI("https://gateway.pinata.cloud/ipfs/");
     }
 
     function getCategory() public view returns(string memory) {
         return category;    
+    }
+    
+    function getArtistPercentage() public view returns(uint256) {
+        uint256 artistPercentage = 100-company_fee;
+        return artistPercentage;
+    }
+    
+    function setCompanyFee(uint256 _cfee) public onlyOwner returns(bool){
+        company_fee = _cfee;
+        return true;
+    }
+    
+    function getCompanyFee() public view returns(uint256){
+        return company_fee;    
     }
     
 	function setSale(uint256 tokenId, uint256 price) public {
@@ -57,7 +67,7 @@ contract EtherNaal is ERC721URIStorage{
 		salePrice[tokenId] = price;
 	}
 
-	function buyTokenOnSale(uint256 tokenId) public payable {
+	function buyTokenOnSale(uint256 tokenId, uint256 artistBalance, uint256 companyBalance) public payable {
 		uint256 price = salePrice[tokenId];
         require(price != 0, "buyToken: price equals 0");
         require(msg.value == price, "buyToken: price doesn't equal salePrice[tokenId]");
@@ -66,11 +76,11 @@ contract EtherNaal is ERC721URIStorage{
 		salePrice[tokenId] = 0;
 		
 		transferFrom(tOwner, msg.sender, tokenId);
-		uint256 artistPercentage = 100-company_fee;
-		uint256 artistBalance = (1 ether * 0.01) * msg.value* artistPercentage;
+	
+		//uint256 artistBalance = msg.value* artistPercentage*0.01;
         payable(tOwner).transfer(artistBalance);
         
-        uint256 companyBalance = (1 ether*0.01)*company_fee*msg.value;
+        //uint256 companyBalance = company_fee*msg.value*0.01;
         ethernaal_org.transfer(companyBalance);
 	}
 	
