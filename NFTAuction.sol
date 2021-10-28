@@ -1,236 +1,287 @@
-// SPDX-License-Identifier: EtherNaal
-pragma solidity >=0.6.0 <0.8.0;
 
-import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v3.0.0/contracts/token/ERC721/ERC721.sol";
+// SPDX-License-Identifier: UNLICENSED
 
-/**
- * @title Ownable
- * @dev The Ownable contract has an owner address, and provides basic authorization control
- * functions, this simplifies the implementation of "user permissions".
- */
-contract Ownable {
-  address payable public owner;
+pragma solidity >=0.6.0 <0.9.0;
 
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
+import "@openzeppelin/contracts/utils/Counters.sol";
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 
-  event OwnershipRenounced(address indexed previousOwner);
-  event OwnershipTransferred(
-    address indexed previousOwner,
-    address indexed newOwner
-  );
+contract EtherNaal is ERC721URIStorage {
 
-
-  /**
-   * @dev The Ownable constructor sets the original `owner` of the contract to the sender
-   * account.
-   */
-  constructor() public {
-    owner = msg.sender;
-  }
-
-  /**
-   * @dev Throws if called by any account other than the owner.
-   */
-  modifier onlyOwner() {
-    require(msg.sender == owner);
-    _;
-  }
-
-  /**
-   * @dev Allows the current owner to relinquish control of the contract.
-   */
-  function renounceOwnership() public onlyOwner {
-    emit OwnershipRenounced(owner);
-    owner = address(0);
-  }
-
-  /**
-   * @dev Allows the current owner to transfer control of the contract to a newOwner.
-   * @param _newOwner The address to transfer ownership to.
-   */
-  function transferOwnership(address payable _newOwner) public onlyOwner {
-    _transferOwnership(_newOwner);
-  }
-
-  /**
-   * @dev Transfers control of the contract to a newOwner.
-   * @param _newOwner The address to transfer ownership to.
-   */
-  function _transferOwnership(address payable _newOwner) internal {
-    require(_newOwner != address(0));
-    emit OwnershipTransferred(owner, _newOwner);
-    owner = _newOwner;
-  }
-}
-
-/**
- * @title Pausable
- * @dev Base contract which allows children to implement an emergency stop mechanism.
- */
-contract Pausable is Ownable {
-  event Pause();
-  event Unpause();
-
-  bool public paused = false;
-
-
-  /**
-   * @dev Modifier to make a function callable only when the contract is not paused.
-   */
-  modifier whenNotPaused() {
-    require(!paused);
-    _;
-  }
-
-  /**
-   * @dev Modifier to make a function callable only when the contract is paused.
-   */
-  modifier whenPaused() {
-    require(paused);
-    _;
-  }
-
-  /**
-   * @dev called by the owner to pause, triggers stopped state
-   */
-  function pause() onlyOwner whenNotPaused public {
-    paused = true;
-    emit Pause();
-  }
-
-  /**
-   * @dev called by the owner to unpause, returns to normal state
-   */
-  function unpause() onlyOwner whenPaused public {
-    paused = false;
-    emit Unpause();
-  }
-}
-
-/**
- * @title Destructible
- * @dev Base contract that can be destroyed by owner. All funds in contract will be sent to the owner.
- */
-contract Destructible is Ownable {
-
-  constructor() public payable { }
-
-  /**
-   * @dev Transfers the current balance to the owner and terminates the contract.
-   */
-  function destroy() onlyOwner public {
-    selfdestruct(owner);
-  }
-
-  function destroyAndSend(address payable _recipient) onlyOwner public {
-    selfdestruct(_recipient);
-  }
-}
-
-
-contract EtherNaalBidding is Ownable, Pausable, Destructible {
-
-    event Sent(address indexed payee, uint256 amount, uint256 balance);
-    event Received(address indexed payer, uint tokenId, uint256 amount, uint256 balance);
-    //event RoyaltiesGiven(address indexed owner, uint256 amount);
-    event TokenTransferred(address indexed owner, address indexed receiver, uint256 tokenId);
-    
-    struct Token {
-        uint256 id;
-        uint256 salePrice;
-        bool active;
-    }
-
-    /**
-    * ERC721 - Eth contract to create NFTs
-    */
-    ERC721 public nftAddress;
-    address payable public saleOwner;
+    using SafeMath for uint256;
     mapping(uint256 => uint256) private salePrice;
-    mapping(uint256 => Token) public tokens;
-    
+    mapping(address => bool) private creatorWhitelist;
+    mapping(address => uint256[]) private ownedTokens;
+    mapping(uint256 => uint256) private ownedTokensIndex;
+    mapping(uint256 => address) private tokenOwner;
+    mapping(uint256 => string) public tokenURIMap;
+    mapping(uint256 => address) private tokenApprovals;
+    mapping(uint256 => address) private tokenCreator;
+    mapping(uint256 => bool) private tokenSold;
     //Holds a mapping between the tokenId and the bidding contract
     mapping(uint256 => Bidding) tokenBids;
-    
 
-    /**
-    * @dev Contract Constructor
-    * @param _nftAddress address for the Harmongy non-fungible token contract 
-    */
-    constructor(address _nftAddress) public { 
-        require(_nftAddress != address(0) && _nftAddress != address(this));
-        nftAddress = ERC721(_nftAddress);
-        saleOwner = msg.sender;
+    event SalePriceSet(uint256 indexed _tokenId, uint256 indexed _price);
+    event Sold(address indexed _buyer, address indexed _seller, uint256 _amount, uint256 indexed _tokenId);
+    event WhitelistCreator(address indexed _creator);
+
+    address owner;
+    uint256 company_fee;
+    address payable ethernaal_org;
+    using Counters for Counters.Counter;
+    Counters.Counter private _tokenIds;
+    string category;
+
+
+    modifier onlyMinter() {
+        require(creatorWhitelist[msg.sender] == true);
+        _;
     }
 
-    /**
-     * @dev check the owner of a Token
-     * @param _tokenId uint256 token representing an Object
-     * Test function to check if the token address can be retrieved.
-     */
-    function getTokenSellerAddress(uint256 _tokenId) internal view returns(address) {
-        address tokenSeller = nftAddress.ownerOf(_tokenId);
-        return tokenSeller;
-    }
-    
-    /**
-     * @dev Sell _tokenId for price 
-     */
- 
-    function setSaleToken(uint256 _tokenId, uint256 _price, uint _biddingTime) 
-    public returns(address) {
-		require(nftAddress.ownerOf(_tokenId) != address(0), "setSale: nonexistent token");
-		//require(tokens[_tokenId].active != true, "Token Already up for sale");
-        Token memory token;
-		token.id = _tokenId;
-		token.active = true;
-		token.salePrice = _price;
-		tokens[_tokenId] = token;
-		
-		Bidding placeBids = new Bidding(_tokenId, _biddingTime, _price, saleOwner);
-		tokenBids[_tokenId] = placeBids;
-    
-        return(address(placeBids));
-		
-	} 
-
-    /**
-    * @dev Purchase _tokenId
-    * @param _tokenId uint256 token ID representing an Object
-    */
-    function transferToken(uint256 _tokenId) public whenNotPaused {
-        require(msg.sender != address(0) && msg.sender != address(this));
-        require(nftAddress.ownerOf(_tokenId) != address(0));
-        require(tokens[_tokenId].active == true, "Token is not registered for sale!");
-        
-        /*
-        De-registering the token once it's purchased.
-        */
-        Token memory sellingToken = tokens[_tokenId];
-        sellingToken.active = false;
-        tokens[_tokenId] = sellingToken;
-        
-                
-        address tokenSeller = nftAddress.ownerOf(_tokenId);
-        address highestBidder = tokenBids[_tokenId].highestBidder();
-        nftAddress.safeTransferFrom(tokenSeller, highestBidder, _tokenId);
-        
-        emit TokenTransferred(tokenSeller, highestBidder, _tokenId);
-        
-    }
-    
-    
-    /*
-    * @param _tokenId: Teokn ID to get the Bidding contract address
-    */
-    function getBiddingContractAddress(uint256 _tokenId) public view returns(address){
-        return(address(tokenBids[_tokenId]));
+    modifier notOwnerOf(uint256 _tokenId) {
+        require(ownerOf(_tokenId) != msg.sender);
+        _;
     }
 
+    modifier onlyOwnerOf(uint256 _tokenId) {
+        require(ownerOf(_tokenId) == msg.sender);
+        _;
+    }
+
+    modifier onlyOwner() {
+        require(msg.sender == owner);
+        _;
+    }
+
+    constructor(string memory _name, 
+        string memory _symbol,
+        address payable org,
+        string memory _category)
+        ERC721(_name, _symbol)
+    {
+        owner = msg.sender;
+        company_fee = 3;
+        ethernaal_org = org;
+        category = _category;
+    }
+
+    function getCategory() public view returns (string memory) {
+        return category;
+    }
+
+    function clearApproval(address _owner, uint256 _tokenId) private {
+        require(ownerOf(_tokenId) == _owner);
+        tokenApprovals[_tokenId] = address(0);
+        emit Approval(_owner, address(0), _tokenId);
+    }
+
+    function addToken(address _to, uint256 _tokenId) private {
+        require(tokenOwner[_tokenId] == address(0));
+        tokenOwner[_tokenId] = _to;
+        uint256 length = balanceOf(_to);
+        ownedTokens[_to].push(_tokenId);
+        ownedTokensIndex[_tokenId] = length;
+        _tokenIds.increment();
+    }
+
+    function approvedFor(uint256 _tokenId) public view returns (address) {
+        return tokenApprovals[_tokenId];
+    }
+
+    function removeToken(address _from, uint256 _tokenId) private {
+        require(ownerOf(_tokenId) == _from);
+
+        uint256 tokenIndex = ownedTokensIndex[_tokenId];
+        uint256 lastTokenIndex = balanceOf(_from).sub(1);
+        uint256 lastToken = ownedTokens[_from][lastTokenIndex];
+
+        tokenOwner[_tokenId] = address(0);
+        ownedTokens[_from][tokenIndex] = lastToken;
+        ownedTokens[_from][lastTokenIndex] = 0;
+        // Note that this will handle single-element arrays. In that case, both tokenIndex and lastTokenIndex are going to
+        // be zero. Then we can make sure that we will remove _tokenId from the ownedTokens list since we are first swapping
+        // the lastToken to the first position, and then dropping the element placed in the last position of the list
+
+        ownedTokens[_from].pop();
+        ownedTokensIndex[_tokenId] = 0;
+        ownedTokensIndex[lastToken] = tokenIndex;
+        _tokenIds.decrement();
+    }
+
+    function clearApprovalAndTransfer(
+        address _from,
+        address _to,
+        uint256 _tokenId
+    ) internal {
+        require(_to != address(0));
+        require(_to != ownerOf(_tokenId));
+        require(ownerOf(_tokenId) == _from);
+
+        clearApproval(_from, _tokenId);
+        removeToken(_from, _tokenId);
+        addToken(_to, _tokenId);
+        emit Transfer(_from, _to, _tokenId);
+    }
+
+    // function payout(uint256 _val, address _maintainer, address _creator, address _tokenOwner, uint256 _tokenId) private {
+    //     uint256 maintainerPayment;
+    //     uint256 creatorPayment;
+    //     uint256 ownerPayment;
+    //     if (tokenSold[_tokenId]) {
+    //         maintainerPayment = _val.mul(company_fee).div(1000);
+    //         creatorPayment = _val.mul(getArtistPercentage()).div(1000);
+    //         ownerPayment = _val.sub(creatorPayment).sub(maintainerPayment); 
+    //     } else {
+    //         maintainerPayment = 0;
+    //         creatorPayment = _val;
+    //         ownerPayment = 0;
+    //         tokenSold[_tokenId] = true;
+    //     }
+    //      payable(_maintainer).transfer(maintainerPayment);
+    //      payable(_creator).transfer(creatorPayment);
+    //      payable(_tokenOwner).transfer(ownerPayment);
+    // }
+
+    // function buy(uint256 _tokenId) public payable notOwnerOf(_tokenId) {
+    //     uint256 currentSalePrice = salePrice[_tokenId];
+    //     uint256 sentPrice = msg.value;
+    //     address buyer = msg.sender;
+    //     address currentTokenOwner = ownerOf(_tokenId);
+    //     address creator = tokenCreator[_tokenId];
+    //     require(currentSalePrice > 0);
+    //     require(sentPrice >= currentSalePrice);
+    //     clearApprovalAndTransfer(currentTokenOwner, buyer, _tokenId);
+    //     payout(sentPrice, currentTokenOwner, creator, currentTokenOwner, _tokenId);
+    //     salePrice[_tokenId] = 0;
+    //     emit Sold(buyer, currentTokenOwner, sentPrice, _tokenId);
+    // }
+
+    function transfer(address _to, uint256 _tokenId)
+        public
+        onlyOwnerOf(_tokenId)
+    {
+        clearApprovalAndTransfer(msg.sender, _to, _tokenId);
+    }
+
+    function getArtistPercentage() public view returns (uint256) {
+        uint256 artistPercentage = 100 - company_fee;
+        return artistPercentage;
+    }
+
+    function setCompanyFee(uint256 _cfee) public onlyOwner returns (bool) {
+        company_fee = _cfee;
+        return true;
+    }
+
+    function getCompanyFee() public view returns (uint256) {
+        return company_fee;
+    }
+
+    function setSale(uint256 _tokenId, uint256 price) public onlyOwnerOf(_tokenId) {
+        address tOwner = ownerOf(_tokenId);
+        require(tOwner != address(0), "setSale: nonexistent token");
+        salePrice[_tokenId] = price;
+        emit SalePriceSet(_tokenId, price);
+    }
+
+    function setAuction(uint256 _tokenId, uint256 reservePrice, uint _biddingTime) public onlyOwnerOf(_tokenId) {
+        address tOwner = ownerOf(_tokenId);
+        require(tOwner != address(0), "setSale: nonexistent token");
+        salePrice[_tokenId] = reservePrice;
+
+        uint256 artistPercentage = getArtistPercentage();
+        uint256 companyPercentage = getCompanyFee();
+        
+        Bidding placeBids = new Bidding(_tokenId, _biddingTime, reservePrice, payable(tOwner), payable(ethernaal_org), artistPercentage, companyPercentage);
+        tokenBids[_tokenId] = placeBids;
+        emit SalePriceSet(_tokenId, reservePrice);
+    }
+
+    
+
+    function buyTokenOnSale(uint256 tokenId, address _nftAddress)
+        public
+        payable
+    {
+        ERC721 nftAddress = ERC721(_nftAddress);
+
+        uint256 price = salePrice[tokenId];
+        require(price != 0, "buyToken: price equals 0");
+        require(
+            msg.value == price,
+            "buyToken: price doesn't equal salePrice[tokenId]"
+        );
+        address tOwner = ownerOf(tokenId);
+
+        salePrice[tokenId] = 0;
+
+        nftAddress.transferFrom(tOwner, msg.sender, tokenId);
+
+        ownedTokens[tOwner][ownedTokensIndex[tokenId]] = 0;
+        ownedTokens[msg.sender].push(tokenId);
+        uint256 artistPercentage = getArtistPercentage();
+        uint256 artistBalance = (msg.value * artistPercentage * 1) / 100;
+
+        payable(tOwner).transfer(artistBalance);
+        uint256 companyBalance = (getCompanyFee() * msg.value * 1) / 100;
+        ethernaal_org.transfer(companyBalance);
+    }
+
+    //function mintWithIndex(address to, string memory tokenURI) public {
+    function mintWithIndex(address _creator, string memory _tokenURI)
+        public onlyMinter
+        returns (uint256 _tokenId)
+    {
+        _tokenIds.increment();
+        uint256 tokenId = _tokenIds.current();
+        tokenOwner[tokenId] = _creator;
+        uint256 length = balanceOf(_creator);
+        ownedTokens[_creator].push(tokenId);
+        ownedTokensIndex[tokenId] = length;
+        tokenCreator[tokenId] = _creator;
+        _mint(_creator, tokenId);
+        _setTokenURI(tokenId, _tokenURI);
+        tokenURIMap[tokenId] = _tokenURI;
+        tokenCreator[tokenId] = _creator;
+
+        return tokenId;
+    }
+
+    function tokensOf(address _owner) public view returns (uint256[] memory) {
+        return ownedTokens[_owner];
+    }
+
+    function whitelistCreator(address _creator) public onlyOwner {
+        creatorWhitelist[_creator] = true;
+        emit WhitelistCreator(_creator);
+    }
+
+    function getSalePrice(uint256 tokenId) public view returns (uint256) {
+        return salePrice[tokenId];
+    }
+
+    function isWhitelisted(address _creator) external view returns (bool) {
+        return creatorWhitelist[_creator];
+    }
+
+    function creatorOfToken(uint256 _tokenId) public view returns (address) {
+        return tokenCreator[_tokenId];
+    }
+
+    function getTokenURI(uint256 _tokenId)
+        external
+        view
+        returns (string memory)
+    {
+        return tokenURIMap[_tokenId];
+    }
+
+    function totalSupply() public view virtual returns (uint256) {
+        return _tokenIds.current();
+    }
 }
-
-/* 
-* This is the bidding contract 
-*/
 
 contract Bidding {
     // Parameters of the auction. Times are either
@@ -241,9 +292,15 @@ contract Bidding {
     uint public tokenId;
     uint public reservePrice;
     uint bidCounter;
-    address public highestBid;
-    address payable public owner;
-    uint public bidAmountHighest;
+    address public highestBidAddress;
+    uint public highestBid;
+    address public admin;
+    address public nftOwner;
+    uint256 sellerPercentage;
+    uint256 platformPercentage;
+
+    uint[] public sortedBids;
+    address[] public sortedBidders;
 
     struct Bid {
         address payable bidder;
@@ -272,27 +329,33 @@ contract Bidding {
         uint256 _tokenId,
         uint _biddingTime,
         uint _reservePrice,
-        address payable _owner
-    ) public {
+        address payable _nftOwner,
+        address payable _admin,
+        uint256 _sellerPercentage,
+        uint256 _platformPercentage
+    ) {
         reservePrice = _reservePrice;
         tokenId = _tokenId;
         bidCounter = 0;
         auctionEnd = block.timestamp + _biddingTime;
         //Explicitly setting the owner to our address for now
         // msg.sender is coming as the address of the contract
-        owner = _owner;
+        nftOwner = _nftOwner;
+        admin = _admin;
+        sellerPercentage = _sellerPercentage;
+        platformPercentage = _platformPercentage;
         
     }
 
-    modifier onlyOwner() {
-        require(msg.sender == owner);
+    modifier onlyAdmin() {
+        require(msg.sender == admin);
         _;
     }
     
     //ONLY FOR TESTING
-    function getOwner() public view returns(address){
-      return owner;
-    }
+    function getAdmin() public view returns(address){
+      return admin;
+    }   
 
     /// Bid on the auction with the value sent
     /// together with this transaction.
@@ -312,15 +375,23 @@ contract Bidding {
             "Auction already ended."
         );
 
-        // If the bid is not higher than 0, no bidding happens
+        // If the bid is not higher than the reservePrice, send the
+        // money back.
         require(
             msg.value > 0,
-            "The bid value should be greater than 0."
+            "You cannot bid 0 as the price."
         );
 
+        if(sortedBids.length != 0) {
+            require(msg.value > sortedBids[sortedBids.length -1], "Bid value should be greeater than current highest bid");
+        }
+
        Bid storage newBid = bids[bidCounter+1];
-       newBid.bidder = msg.sender;
+       newBid.bidder = payable(msg.sender);
        newBid.bidAmount = msg.value;
+       
+       sortedBids.push(msg.value);
+       sortedBidders.push(msg.sender);
        
        bidCounter = bidCounter+1;
     }
@@ -328,82 +399,34 @@ contract Bidding {
     /*
     * Get the address of the highest bidder
     */
-    function highestBidder() onlyOwner public returns(address) {
+    /*
+    * Get the address of the highest bidder
+    */
+    function highestBidder() public view returns(address) {
         
-        uint highestBidValue;
-        address highestBidAddress;
-        
-        highestBidValue = bids[0].bidAmount;
-        highestBidAddress = address(0);
-        
-        for(uint i = 0; i <= bidCounter ; i ++){
-            
-            if(bids[i].bidAmount > highestBidValue) {
-                highestBidValue = bids[i].bidAmount;
-                highestBidAddress = bids[i].bidder;
-            }
-                
-        }
-        
-        return highestBidAddress;
+        require(sortedBidders.length > 0, "No bids yet");
+        return sortedBidders[sortedBidders.length - 1];
         
     }
     
     
     /*
     * Get the highest bid amount
-    * @param _highestBidder address of the highest bidder
     */
-    function highestBidAmount(address _highestBidder) onlyOwner public view returns(uint)  {
+    function highestBidAmount() public view returns(uint)  {
         
-        for(uint i = 0; i <= bidCounter ; i ++){
-            
-            if(bids[i].bidder == _highestBidder) {
-               return bids[i].bidAmount;
-            }
-                
-        }
-        return 0;
-    }
-    
-    /*
-    * Function to send the bidAmount to the NFT owner
-    * @param _nftOwner: address of the NFT Owner
-    */
-     function sendMoneyToOwner(address payable _nftOwner, uint ownerShare) onlyOwner public {
-        require(block.timestamp >= auctionEnd, "Auction not yet ended.");
-        require(ended, "Auction end has not been called.");
-        require(ownerShare < bidAmountHighest, "Royalties are not being given to the artist!");
-        //Send the money to the nftOwner
-        _nftOwner.transfer(ownerShare);
-        
+        require(sortedBids.length > 0, "No bids yet");
+        return sortedBids[sortedBids.length - 1];
     }
 
     
-    function geReservePrice() onlyOwner public view returns(uint){
-      return reservePrice;
-    }
-
-
-    /*
-    * Function to send the royalty amount to the selected artists
-    * @param _artists: address of the the artists who will receive royalty
-    * @param _royaltyAmount: amount of money to be sent as royalty per artist
-    */
-    function sendRoyaltyMoney(address payable[] memory _artists, uint[] memory _royaltyAmount) onlyOwner public {
-        require(block.timestamp >= auctionEnd, "Auction not yet ended.");
-        require(_artists.length == _royaltyAmount.length, "Number of royalties not matchiing the number of artists!");
-        require(ended, "Auction end has not been called.");
-        for(uint i = 0; i < _artists.length; i++ ){
-            _artists[i].transfer(_royaltyAmount[i]);
-        }
-        
-    }
     
     /*
     * Withdraw bids that were not the winners.
     */
-    function disperseFunds() onlyOwner public returns (bool) {
+    function disperseFunds() onlyAdmin public returns (bool) {
+        require(block.timestamp >= auctionEnd, "Auction not yet ended.");
+        require(ended, "Auction end has not been called.");
         uint amount = 0;
         for(uint i = 0; i <= bidCounter; i ++){
             amount = bids[i].bidAmount;
@@ -412,7 +435,7 @@ contract Bidding {
                 return false;
             }
           
-            if(bids[i].bidder != highestBid){
+            if(bids[i].bidder != highestBidAddress){
                 
                 bids[i].bidder.transfer(amount);
             }
@@ -425,15 +448,16 @@ contract Bidding {
     * In case of an emergency, this function can be called to send all
     * the funds from the contract to the owner address.
     */
-    function finalize() public onlyOwner {
-        selfdestruct(owner);
+    function finalize() onlyAdmin public  {
+        selfdestruct(payable(admin));
     }
     
     
     /* 
-    * End the auction and calculate the highest bid
+    * @param _charity - Address of the charity organisation chosen by the NFT Owner
+    * End the auction and send the highest bid to the nftOwner.
     */
-    function auctionEnded() onlyOwner public {
+    function closeAuction() onlyAdmin public {
 
         // 1. Conditions
         require(block.timestamp >= auctionEnd, "Auction not yet ended.");
@@ -443,10 +467,26 @@ contract Bidding {
         ended = true;
 
         // 3. Get the highest bidder 
-        highestBid = highestBidder();
+        highestBidAddress = highestBidder();
         
-         //4. Send the money to the owner and royalties to artists
-        bidAmountHighest = highestBidAmount(highestBid);
+         //4. Send the money to the owner and the charity
+        highestBid = highestBidAmount();
 
+        uint sellerShare = highestBidAmount()*(sellerPercentage/100);
+        uint platformShare = highestBidAmount()*(platformPercentage/100);
+        
+        payable(nftOwner).transfer(sellerShare);
+        payable(admin).transfer(platformShare);
+        
     }
+
+    function geReservePrice() onlyAdmin  public view returns(uint){
+      return reservePrice;
+    }
+
+    function getHighestBid() onlyAdmin public view returns(uint){
+      require(ended, "Auction end has not been called.");
+      return highestBid;
+    }
+
 }
