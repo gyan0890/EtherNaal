@@ -1,4 +1,3 @@
-
 // SPDX-License-Identifier: UNLICENSED
 
 pragma solidity >=0.6.0 <0.9.0;
@@ -90,81 +89,6 @@ contract EtherNaal is ERC721URIStorage {
         return tokenApprovals[_tokenId];
     }
 
-    function removeToken(address _from, uint256 _tokenId) private {
-        require(ownerOf(_tokenId) == _from);
-
-        uint256 tokenIndex = ownedTokensIndex[_tokenId];
-        uint256 lastTokenIndex = balanceOf(_from).sub(1);
-        uint256 lastToken = ownedTokens[_from][lastTokenIndex];
-
-        tokenOwner[_tokenId] = address(0);
-        ownedTokens[_from][tokenIndex] = lastToken;
-        ownedTokens[_from][lastTokenIndex] = 0;
-        // Note that this will handle single-element arrays. In that case, both tokenIndex and lastTokenIndex are going to
-        // be zero. Then we can make sure that we will remove _tokenId from the ownedTokens list since we are first swapping
-        // the lastToken to the first position, and then dropping the element placed in the last position of the list
-
-        ownedTokens[_from].pop();
-        ownedTokensIndex[_tokenId] = 0;
-        ownedTokensIndex[lastToken] = tokenIndex;
-        _tokenIds.decrement();
-    }
-
-    function clearApprovalAndTransfer(
-        address _from,
-        address _to,
-        uint256 _tokenId
-    ) internal {
-        require(_to != address(0));
-        require(_to != ownerOf(_tokenId));
-        require(ownerOf(_tokenId) == _from);
-
-        clearApproval(_from, _tokenId);
-        removeToken(_from, _tokenId);
-        addToken(_to, _tokenId);
-        emit Transfer(_from, _to, _tokenId);
-    }
-
-    // function payout(uint256 _val, address _maintainer, address _creator, address _tokenOwner, uint256 _tokenId) private {
-    //     uint256 maintainerPayment;
-    //     uint256 creatorPayment;
-    //     uint256 ownerPayment;
-    //     if (tokenSold[_tokenId]) {
-    //         maintainerPayment = _val.mul(company_fee).div(1000);
-    //         creatorPayment = _val.mul(getArtistPercentage()).div(1000);
-    //         ownerPayment = _val.sub(creatorPayment).sub(maintainerPayment); 
-    //     } else {
-    //         maintainerPayment = 0;
-    //         creatorPayment = _val;
-    //         ownerPayment = 0;
-    //         tokenSold[_tokenId] = true;
-    //     }
-    //      payable(_maintainer).transfer(maintainerPayment);
-    //      payable(_creator).transfer(creatorPayment);
-    //      payable(_tokenOwner).transfer(ownerPayment);
-    // }
-
-    // function buy(uint256 _tokenId) public payable notOwnerOf(_tokenId) {
-    //     uint256 currentSalePrice = salePrice[_tokenId];
-    //     uint256 sentPrice = msg.value;
-    //     address buyer = msg.sender;
-    //     address currentTokenOwner = ownerOf(_tokenId);
-    //     address creator = tokenCreator[_tokenId];
-    //     require(currentSalePrice > 0);
-    //     require(sentPrice >= currentSalePrice);
-    //     clearApprovalAndTransfer(currentTokenOwner, buyer, _tokenId);
-    //     payout(sentPrice, currentTokenOwner, creator, currentTokenOwner, _tokenId);
-    //     salePrice[_tokenId] = 0;
-    //     emit Sold(buyer, currentTokenOwner, sentPrice, _tokenId);
-    // }
-
-    function transfer(address _to, uint256 _tokenId)
-        public
-        onlyOwnerOf(_tokenId)
-    {
-        clearApprovalAndTransfer(msg.sender, _to, _tokenId);
-    }
-
     function getArtistPercentage() public view returns (uint256) {
         uint256 artistPercentage = 100 - company_fee;
         return artistPercentage;
@@ -185,7 +109,8 @@ contract EtherNaal is ERC721URIStorage {
         salePrice[_tokenId] = price;
         emit SalePriceSet(_tokenId, price);
     }
-
+    
+    //BIDDING TIME IS IN SECONDS
     function setAuction(uint256 _tokenId, uint256 reservePrice, uint _biddingTime) public onlyOwnerOf(_tokenId) {
         address tOwner = ownerOf(_tokenId);
         require(tOwner != address(0), "setSale: nonexistent token");
@@ -198,9 +123,21 @@ contract EtherNaal is ERC721URIStorage {
         tokenBids[_tokenId] = placeBids;
         emit SalePriceSet(_tokenId, reservePrice);
     }
-
     
+    function transferNFT(uint256 _tokenId, address _nftAddress) public {
+        require(msg.sender == ethernaal_org, "Only admin can call this function");
+        ERC721 nftAddress = ERC721(_nftAddress);
+        address tOwner = ownerOf(_tokenId);
+        
+        address receiver = tokenBids[_tokenId].highestBidder();
+        nftAddress.safeTransferFrom(tOwner, receiver, _tokenId);
+        
+    }
 
+    function getBidContractAddress(uint256 _tokenId) public view returns(address){
+        return address(tokenBids[_tokenId]);
+    }
+    
     function buyTokenOnSale(uint256 tokenId, address _nftAddress)
         public
         payable
